@@ -13,7 +13,6 @@ describe('findNftAddresses', async function () {
   this.retries(5);
   it('given a master, should return an object containing an array of prints and a master address', async function () {
     const resp = await findNftAddresses(master, process.env.SOLANA_RPC_MAINNET_URI);
-
     assert.equal(resp.masterAddress, master);
     assert.deepEqual(resp.printAddresses, prints);
   });
