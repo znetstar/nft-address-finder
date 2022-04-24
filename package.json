@@ -5,7 +5,8 @@
   "main": "lib/index.js",
   "scripts": {
     "test": "mocha -r ts-node/register --timeout 0 --ui bdd src/test/*",
-    "build": "shx rm -rf ./lib && tsc -b"
+    "build": "shx rm -rf ./lib && tsc -b",
+    "prepare": "npm run build"
   },
   "keywords": ["nft", "solana", "crypto"],
   "repository": {
