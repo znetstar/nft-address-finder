@@ -48,7 +48,7 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = 'htt
 
   const transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [lastSignature], rpcUrl);
 
-  const accounts = await transaction?.transaction?.message?.accountKeys;
+  const accounts = transaction.transaction.message.accountKeys;
   const indexOfIndexInstruction = transaction.transaction.message.instructions.map(i => i.data).indexOf('6AuM4xMCPFhR');
   const instructionAfterIndex = transaction.transaction.message.instructions[indexOfIndexInstruction + 1];
   const indexAddress = accounts[instructionAfterIndex.accounts.length > 9 ? instructionAfterIndex.accounts[8] : transaction.transaction.message.instructions[indexOfIndexInstruction].accounts[1]];
