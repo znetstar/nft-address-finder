@@ -2,15 +2,20 @@ import {assert} from 'chai';
 import {findNftAddresses} from "../index";
 
 const prints = [
-  'GGjvuJHpHVr2p4E194we2FFJbipv5snbTzsV7fyECidA',
-  '7V7ALnEVAqgBmy9rUdvBQLQgY4MTL193RwFXKHCjyPVL',
-  '4i5nKhjTfuddPLEr2w8bNvUC8VoxT4Lfu4dEsVbsRRzf'
+  'AWtH1hJbyJcaHYCqyQ4nMaXLH7Epa1Ly2euvdTY3g4ii'
 ];
 
-const master = '6vCYMSFkpH9oD2f1zFxXTodWnCvPfnt3NofyhbUrZU97';
+const master = '5uoXhqy2cWcJv3xpoMgbN8PCpvn3o1RiXaaU5PBcvH2A';
+
+const sigs = [
+  '3LvNQ5oqhtXM5Fdi22vJPSub2WfcHfg7RVDZ95d5tpmWKceShnnETeXnmZbp7v6Pvc2ofZJSPqHuFxvgauUEAFBx',
+  '5MbZD2ij6a579HmESKA8W6Wxhmix3q5j2ajqacjy6wd5aomFRkvWJyxC18Nq5b5UgVsmkAt1aJBAvCuRaLPuywR3'
+];
+
+const meta = '3UisUPU7MKKobcaRFHcPHx83M5M5gyh3uR8uMX6hhNQd';
 
 describe('findNftAddresses', async function () {
-  this.retries(5);
+  this.retries(1);
   it('given a master, should return an object containing an array of prints and a master address', async function () {
     const resp = await findNftAddresses(master, process.env.SOLANA_RPC_MAINNET_URI);
     assert.equal(resp.masterAddress, master);
@@ -27,8 +32,17 @@ describe('findNftAddresses', async function () {
   });
 
   it('should return a master/prints given an associated id', async function () {
-    const resp = await findNftAddresses('6APj2qGFJx5NDHnP5XVKJbrgK5CyCe4HesCTpSDtztMi', process.env.SOLANA_RPC_MAINNET_URI);
-    assert.equal(resp.masterAddress, 'FaFoebQQPQLgvJZUPQym9YL1WgUrJQnoJBZksjAgUCnL');
-    assert.deepEqual(resp.printAddresses, ['7tPRGNHzMkUYFUtKxrNGaRrSUgu4eLKtavrB8Ddpy1SP']);
+    const resp = await findNftAddresses(meta, process.env.SOLANA_RPC_MAINNET_URI);
+    assert.equal(resp.masterAddress, master);
+    assert.deepEqual(resp.printAddresses, prints);
+  });
+
+  it('give a signature of a minting transaction, should return an object containing an array of prints and a master address', async function () {
+    for (const sig of sigs) {
+      const resp = await findNftAddresses(sig, process.env.SOLANA_RPC_MAINNET_URI);
+
+      assert.equal(resp.masterAddress, master);
+      assert.deepEqual(resp.printAddresses, prints);
+    }
   });
 });

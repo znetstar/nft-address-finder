@@ -39,12 +39,16 @@ interface GetConfirmedTransactionResponse {
  * @param rpcUrl - URL to the Solana RPC endpoint
  */
 export async function findNftAddresses(nftAddress: string, rpcUrl: string = 'https://explorer-api.mainnet-beta.solana.com/'): Promise<FindNFTAddressesResponse> {
-  const signatures = await rpcInvoke<{ signature: string }[]>(
-    'getConfirmedSignaturesForAddress2',
-    [nftAddress],
-    rpcUrl
-  );
-  const { signature: lastSignature } = signatures.slice(-1)[0];
+  let lastSignature = nftAddress;
+  if (nftAddress.match(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)) {
+    const signatures = await rpcInvoke<{ signature: string }[]>(
+      'getConfirmedSignaturesForAddress2',
+      [nftAddress],
+      rpcUrl
+    );
+    const {signature} = signatures.slice(-1)[0];
+    lastSignature = signature;
+  }
 
   const transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [lastSignature], rpcUrl);
 
@@ -59,14 +63,19 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = 'htt
     rpcUrl
   );
 
-  const addresses = await Promise.all(
+  const addressesKeyValue = new Map<string, string>(await Promise.all(
     tokenSignatures.map(async ({ signature }) => {
       const transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature], rpcUrl);
 
-      return transaction?.transaction?.message?.accountKeys[1];
+      return transaction?.transaction?.message?.accountKeys.slice(1, 3) as [ string, string ];
     })
-  );
+  ));
 
+  for (let [k,v] of Array.from(addressesKeyValue.entries())) {
+    addressesKeyValue.delete(v);
+  }
+
+  const addresses = Array.from(addressesKeyValue.keys());
 
   return {
     masterAddress: addresses.pop(),
