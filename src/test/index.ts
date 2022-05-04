@@ -2,20 +2,24 @@ import {assert} from 'chai';
 import {findNftAddresses} from "../index";
 
 const prints = [
-  'AWtH1hJbyJcaHYCqyQ4nMaXLH7Epa1Ly2euvdTY3g4ii'
-];
+  "A4tFhL2xaeei16RakryJ6DpmoFHrrwcz3AATGnYQRF3a",
+  "9zNEuRSg2j23sKP9Y9uF65P83PqjmAbxSZEYj1vVoCtC",
+  "BkrS8ZJEXCfXrwN1iSkwWFBSCRKyFJmUcRphSa9hgCo6",
+  "726Kr2AP69kFoZTHNWd87bxi7jkyHDRLcFKztQBf9nho"
+]
 
-const master = '5uoXhqy2cWcJv3xpoMgbN8PCpvn3o1RiXaaU5PBcvH2A';
+const master = 'FxMhoCbKMxNpBxmySG4mLe9Dd7gmiJXt4FqNxQGyYhpW';
 
 const sigs = [
-  '3LvNQ5oqhtXM5Fdi22vJPSub2WfcHfg7RVDZ95d5tpmWKceShnnETeXnmZbp7v6Pvc2ofZJSPqHuFxvgauUEAFBx',
-  '5MbZD2ij6a579HmESKA8W6Wxhmix3q5j2ajqacjy6wd5aomFRkvWJyxC18Nq5b5UgVsmkAt1aJBAvCuRaLPuywR3'
+  'TaMyHAJYB3min4AAKidWeGfmKjFhwykZKWAzpHC8vZnkCAZzkqADwGKu5BAAsNr5xzoJJhhBAjUJjgm7TYooKRa',
+  'Wadz3T7SjEgvTezsXDsgkzkrbX98rXgW6s7gn3iLK7RecUmzhLcXFQYSWsr5rxAVyrMNHLSqSCD6nvYGDsv8o2u'
 ];
 
-const meta = '3UisUPU7MKKobcaRFHcPHx83M5M5gyh3uR8uMX6hhNQd';
+const meta = '9Ea9Bfwdbod6mbjXy1xGks1LLwxtucE9aPTjETX5V2U6';
 
 describe('findNftAddresses', async function () {
   this.retries(1);
+  this.timeout(60e3);
   it('given a master, should return an object containing an array of prints and a master address', async function () {
     const resp = await findNftAddresses(master, process.env.SOLANA_RPC_MAINNET_URI);
     assert.equal(resp.masterAddress, master);
