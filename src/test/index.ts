@@ -20,6 +20,7 @@ const meta = '9Ea9Bfwdbod6mbjXy1xGks1LLwxtucE9aPTjETX5V2U6';
 describe('findNftAddresses', async function () {
   this.retries(1);
   this.timeout(60e3);
+
   it('given a master, should return an object containing an array of prints and a master address', async function () {
     const resp = await findNftAddresses(master, process.env.SOLANA_RPC_MAINNET_URI);
     assert.equal(resp.masterAddress, master);

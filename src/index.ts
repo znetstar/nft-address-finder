@@ -3,6 +3,8 @@ import axios from 'axios';
 
 const MINT_TO = '6AuM4xMCPFhR';
 const DEFAULT_MAX_HOPS = 10;
+const DEFAULT_TRANSACTION_DATA_BATCH_SIZE = 50;
+const DEFAULT_CONFIRMED_SIGNATURE_LIMIT = 1000;
 const DEFAULT_RPC_URL = 'https://explorer-api.mainnet-beta.solana.com/';
 const SystemAccounts = [
   "11111111111111111111111111111111",
@@ -12,7 +14,7 @@ const SystemAccounts = [
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 ];
 
-type SignatureResult = { signature: string };
+type SignatureResult = { signature: string, err: unknown };
 
 
 async function rpcInvoke<T>(
@@ -28,7 +30,9 @@ async function rpcInvoke<T>(
       params,
       id: uuid.v4()
     },
-    { responseType: 'json' }
+    {
+      responseType: 'json'
+    }
   );
 
   if (resp.data.error) {
@@ -51,59 +55,83 @@ interface GetConfirmedTransactionResponse {
 }
 
 /***
- * Returns an iterator that returns the transactions associated with a given address in batches of 1000, up to `maxHops`
- * @param nftAddress
- * @param rpcUrl
- * @param maxHops
- */
-export async function* getConfirmedSignaturesForAddress2(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, maxHops: number = DEFAULT_MAX_HOPS) {
-  let signatures: SignatureResult[] = [];
-  let last: SignatureResult;
-  let load = async () => {
-    const arr = await rpcInvoke<SignatureResult[]>(
-      'getConfirmedSignaturesForAddress2',
-      [nftAddress, { before: last ? last.signature : void(0), limit: 1000 }],
-      rpcUrl
-    );
-
-    return arr.length ? arr : null;
-  }
-
-  let currentHop = 0;
-  while (signatures = await load()) {
-    let $last: SignatureResult;
-    while ($last = signatures.shift()) {
-      last = $last;
-      yield $last;
-    }
-
-    if (currentHop++ > maxHops)
-      break;
-  }
-}
-
-/***
  * Returns all the transactions associated with a given address, looping through batches of 1000 until reaching `maxHops`
  * @param nftAddress
  * @param rpcUrl
  */
 export async function getAllConfirmedSignaturesForAddress2(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, maxHops: number = DEFAULT_MAX_HOPS) {
   let results: SignatureResult[] = [];
+  let currentBatch: SignatureResult[]|null = null;
 
-  for await (const result of getConfirmedSignaturesForAddress2(nftAddress, rpcUrl, maxHops)) {
-    results.push(result);
+  let currentHop = 0;
+  while (currentHop++ < maxHops && (currentBatch === null || currentBatch.length)) {
+    currentBatch =  await rpcInvoke<SignatureResult[]>(
+      'getConfirmedSignaturesForAddress2',
+      [
+        nftAddress,
+        results.slice(-1)[0]?.signature ? { before: results.slice(-1)[0]?.signature, limit: DEFAULT_CONFIRMED_SIGNATURE_LIMIT } : { limit: DEFAULT_CONFIRMED_SIGNATURE_LIMIT }
+      ],
+      rpcUrl
+    );
+    results.push(...currentBatch);
   }
 
   return results;
 }
 
 /**
+ * @author https://stackoverflow.com/a/64543086/17835333
+ */
+async function promiseAllInBatches<T, R>(task: (item: T) => Promise<R>, items: T[], batchSize: number): Promise<R[]> {
+  let position = 0;
+  let results = [];
+  while (position < items.length) {
+    const itemsForBatch = items.slice(position, position + batchSize);
+    results = [...results, ...await Promise.all(itemsForBatch.map(item => task(item)))];
+    position += batchSize;
+  }
+  return results;
+}
+
+export interface TransactionCache {
+  set: (signature: string, transaction: GetConfirmedTransactionResponse) => Promise<void>;
+  get: (signature: string) => Promise<GetConfirmedTransactionResponse|null>;
+}
+
+type FindNFTAddressOptions = {
+  /**
+   * The maximum number of recursive iterations through the blockchain to find transactions (going back in time)
+   */
+  maxHops: number,
+  /**
+   * The maximum number of requests to get full transaction data made in parallel
+   */
+  transactionDataBatchSize: number,
+  /**
+   * An optional cache to store transaction data. It's up to you to implement the caching mechanism.
+   */
+  cache?: TransactionCache
+}
+
+/**
  * Returns the Solana addresses for a master NFT and all of its minted prints
  * @param nftAddress - Any address associated with the NFT, such as a print's address or a token association account address
  * @param rpcUrl - URL to the Solana RPC endpoint
+ * @param opts - Additional options
  */
-export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, maxHops: number = DEFAULT_MAX_HOPS): Promise<FindNFTAddressesResponse> {
+export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, opts: FindNFTAddressOptions = { maxHops: DEFAULT_MAX_HOPS, transactionDataBatchSize: DEFAULT_TRANSACTION_DATA_BATCH_SIZE }): Promise<FindNFTAddressesResponse> {
   let lastSignature = nftAddress;
+
+  const { maxHops, transactionDataBatchSize, cache } = opts;
+
+  let getConfirmedTransaction = async (signature: string) => {
+    let transaction: GetConfirmedTransactionResponse|null = cache ? await cache.get(signature) : null;
+    if (!transaction) {
+      transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature], rpcUrl);
+      cache && await cache.set(signature, transaction);
+    }
+    return transaction as GetConfirmedTransactionResponse;
+  }
 
   // If the input address is an account address we need the oldest signature associated with the account
   if (nftAddress.match(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)) {
@@ -113,7 +141,7 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
   }
 
   // Get the transaction and the index of the "MintTo" instruction
-  const transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [lastSignature], rpcUrl);
+  const transaction = await getConfirmedTransaction(lastSignature);
   const accounts = transaction.transaction.message.accountKeys;
   const indexOfIndexMintingInstruction = transaction.transaction.message.instructions.map(i => i.data).indexOf(MINT_TO);
 
@@ -146,14 +174,14 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
     maxHops
   );
 
-  // Get each full transaction, and return only the second and fourth account inputs
-  const addressesKeyValue = new Map<string, string>(await Promise.all(
-    tokenSignatures.map(async ({ signature }) => {
-      const transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature], rpcUrl);
+  const transactionSignaturesToProcess = tokenSignatures.filter((s) => !s.err);
 
-      return transaction?.transaction?.message?.accountKeys.slice(1, 3) as [ string, string ];
-    })
-  ));
+  // Get each full transaction, and return only the second and fourth account inputs
+  const addressesKeyValue = new Map<string, string>(await promiseAllInBatches(async ({ signature }) => {
+    const transaction = await getConfirmedTransaction(signature);
+
+    return transaction?.transaction?.message?.accountKeys.slice(1, 3) as [ string, string ];
+  }, transactionSignaturesToProcess, transactionDataBatchSize));
 
   // If the fourth account input is the second account input in any of the transactions
   // then that second account input isn't a token but an associated token account. We'll delete those.

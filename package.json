@@ -1,6 +1,6 @@
 {
   "name": "nft-address-finder",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Helps find a master NFT, and all of its prints, on the Solana blockchain",
   "main": "lib/index.js",
   "scripts": {
