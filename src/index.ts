@@ -193,11 +193,11 @@ export async function findNftAddressesCreatedBy(nftAddress: string, rpcUrl: stri
   const addresses = ((await promiseAllInBatches(async ({ signature }) => {
     const transaction = await getConfirmedTransaction(signature, rpcUrl, opts?.cache);
 
-    const mintAddress = transaction.transaction.message.instructions
+    const mintAddress = transaction?.transaction?.message?.instructions
       .filter((i) => i.parsed?.type === 'initializeMint')[0]?.parsed.info.mint;
 
     // To exclude tokens which aren't NFTs
-    const metadataAddress = transaction.transaction.message.instructions
+    const metadataAddress = transaction?.transaction?.message?.instructions
       .filter((i) => i.programId === METADATA_ID || i.programId === CANDY_ID)[0];
 
     return metadataAddress ? mintAddress : null;
