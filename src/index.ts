@@ -1,7 +1,8 @@
 import * as uuid from 'uuid';
 import axios from 'axios';
 
-const MINT_TO = '6AuM4xMCPFhR';
+const METADATA_ID = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
+const CANDY_ID = 'cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ';
 const DEFAULT_MAX_HOPS = 10;
 const DEFAULT_TRANSACTION_DATA_BATCH_SIZE = 50;
 const DEFAULT_CONFIRMED_SIGNATURE_LIMIT = 1000;
@@ -11,8 +12,14 @@ const SystemAccounts = [
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
   "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
   "SysvarRent111111111111111111111111111111111",
-  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ",
+  "SysvarC1ock11111111111111111111111111111111"
 ];
+const DEFAULT_GET_TRANSACTION_OPTIONS = Object.freeze({
+  "encoding": "jsonParsed",
+  "commitment": "confirmed"
+});
 
 type SignatureResult = { signature: string, err: unknown };
 
@@ -47,11 +54,32 @@ interface FindNFTAddressesResponse {
   masterAddress: string;
 }
 
+interface FindNFTAddressesCreatedByResponse {
+  addresses: string[];
+}
+
 interface GetConfirmedTransactionResponse {
   meta: {
     postTokenBalances: ({ accountIndex: number, mint: string })[]
   },
-  transaction: { message: { accountKeys: string[], instructions: { data: string, accounts: number[] }[] } };
+  transaction: {
+    message: {
+      accountKeys: { pubkey: string }[],
+      instructions: {
+        data: string,
+        accounts: string[],
+        programId: string,
+        parsed: {
+          type: string;
+          info: {
+            mintAuthority?: string;
+            mint?: string;
+            source?: string;
+          }
+        }
+      }[]
+    }
+  };
 }
 
 /***
@@ -114,24 +142,30 @@ type FindNFTAddressOptions = {
 }
 
 /**
- * Returns the Solana addresses for a master NFT and all of its minted prints
- * @param nftAddress - Any address associated with the NFT, such as a print's address or a token association account address
- * @param rpcUrl - URL to the Solana RPC endpoint
- * @param opts - Additional options
+ * Gets full transaction data given a signature, optionally pulling from a cache
+ * @param signature
+ * @param rpcUrl
+ * @param cache
  */
-export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, opts: FindNFTAddressOptions = { maxHops: DEFAULT_MAX_HOPS, transactionDataBatchSize: DEFAULT_TRANSACTION_DATA_BATCH_SIZE }): Promise<FindNFTAddressesResponse> {
+async function getConfirmedTransaction(signature: string, rpcUrl: string, cache?: TransactionCache) {
+  let transaction: GetConfirmedTransactionResponse|null = cache ? await cache.get(signature) : null;
+  if (!transaction) {
+    transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature, DEFAULT_GET_TRANSACTION_OPTIONS], rpcUrl);
+    cache && await cache.set(signature, transaction);
+  }
+  return transaction as GetConfirmedTransactionResponse;
+}
+
+/**
+ * Gets the oldest transaction associated with an address, by searching backward in time up to `opts.maxHops`
+ * @param nftAddress
+ * @param rpcUrl
+ * @param opts
+ */
+async function getOldestTransaction(nftAddress: string, rpcUrl: string, opts: FindNFTAddressOptions) {
   let lastSignature = nftAddress;
 
   const { maxHops, transactionDataBatchSize, cache } = opts;
-
-  let getConfirmedTransaction = async (signature: string) => {
-    let transaction: GetConfirmedTransactionResponse|null = cache ? await cache.get(signature) : null;
-    if (!transaction) {
-      transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature], rpcUrl);
-      cache && await cache.set(signature, transaction);
-    }
-    return transaction as GetConfirmedTransactionResponse;
-  }
 
   // If the input address is an account address we need the oldest signature associated with the account
   if (nftAddress.match(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)) {
@@ -140,30 +174,70 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
     lastSignature = signature;
   }
 
-  // Get the transaction and the index of the "MintTo" instruction
-  const transaction = await getConfirmedTransaction(lastSignature);
-  const accounts = transaction.transaction.message.accountKeys;
-  const indexOfIndexMintingInstruction = transaction.transaction.message.instructions.map(i => i.data).indexOf(MINT_TO);
+  const transaction = await getConfirmedTransaction(lastSignature, rpcUrl, cache);
 
-  // Take the instruction after "MintTo" which should interact with "Metaplex Token Metadata"
-  const instructionAfterIndex = transaction.transaction.message.instructions[indexOfIndexMintingInstruction + 1];
+  return transaction;
+}
+
+/**
+ * Returns all NFT addresses ever created by a given address
+ * @param nftAddress - Any address associated with the NFT, such as a print's address or a token association account address
+ * @param rpcUrl - URL to the Solana RPC endpoint
+ * @param opts - Additional options
+ */
+export async function findNftAddressesCreatedBy(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, opts: FindNFTAddressOptions = { maxHops: DEFAULT_MAX_HOPS, transactionDataBatchSize: DEFAULT_TRANSACTION_DATA_BATCH_SIZE }): Promise<FindNFTAddressesCreatedByResponse> {
+  const tokenSignatures = await getAllConfirmedSignaturesForAddress2(nftAddress, rpcUrl, opts?.maxHops);
+
+  const transactionSignaturesToProcess = tokenSignatures.filter((s) => !s.err);
+
+  const addresses = ((await promiseAllInBatches(async ({ signature }) => {
+    const transaction = await getConfirmedTransaction(signature, rpcUrl, opts?.cache);
+
+    const mintAddress = transaction.transaction.message.instructions
+      .filter((i) => i.parsed?.type === 'initializeMint')[0]?.parsed.info.mint;
+
+    // To exclude tokens which aren't NFTs
+    const metadataAddress = transaction.transaction.message.instructions
+      .filter((i) => i.programId === METADATA_ID || i.programId === CANDY_ID)[0];
+
+    return metadataAddress ? mintAddress : null;
+  }, transactionSignaturesToProcess, opts?.transactionDataBatchSize)).filter(Boolean));
+
+  return {
+    addresses
+  };
+}
+
+
+/**
+ * Returns the Solana addresses for a master NFT and all of its minted prints
+ * @param nftAddress - Any address associated with the NFT, such as a print's address or a token association account address
+ * @param rpcUrl - URL to the Solana RPC endpoint
+ * @param opts - Additional options
+ */
+export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, opts: FindNFTAddressOptions = { maxHops: DEFAULT_MAX_HOPS, transactionDataBatchSize: DEFAULT_TRANSACTION_DATA_BATCH_SIZE }): Promise<FindNFTAddressesResponse> {
+  const transaction = await getOldestTransaction(nftAddress, rpcUrl, opts);
+
+  const { maxHops, transactionDataBatchSize, cache } = opts;
+
+  const indexInstruction = transaction.transaction.message.instructions
+    .filter((i) => i.programId === METADATA_ID || i.programId === CANDY_ID)[0];
+
+  const { accounts } = indexInstruction;
+
+  const mintToAddress: string = transaction.transaction.message.instructions.filter(i => i.parsed?.type === 'mintTo').map(i => i.parsed?.info?.mint)[0];
+
+  if (accounts[1] !== mintToAddress)
+    accounts.reverse();
+
   let indexAddress: string;
 
-  // If the instruction has at least 9 inputs, we're good to go
-  if (instructionAfterIndex.accounts.length >= 9) {
-    // We need to find the oldest address that isn't a system address
-    for (const addrIndex of instructionAfterIndex.accounts.slice(0).reverse()) {
-      const addr = accounts[addrIndex];
-      if (!SystemAccounts.includes(addr)) {
-        indexAddress = addr;
+  for (const addr of accounts) {
+    if (!SystemAccounts.includes(addr)) {
+      indexAddress = addr;
 
-        break;
-      }
+      break;
     }
-  }
-  // If there are less than 9 inputs, we'll take the second account of the "MintTo" instruction
-  else {
-    indexAddress = accounts[transaction.transaction.message.instructions[indexOfIndexMintingInstruction].accounts[1]];
   }
 
   // Find all transactions related to the "indexAddress"
@@ -178,9 +252,9 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
 
   // Get each full transaction, and return only the second and fourth account inputs
   const addressesKeyValue = new Map<string, string>(await promiseAllInBatches(async ({ signature }) => {
-    const transaction = await getConfirmedTransaction(signature);
+    const transaction = await getConfirmedTransaction(signature, rpcUrl, cache);
 
-    return transaction?.transaction?.message?.accountKeys.slice(1, 3) as [ string, string ];
+    return transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey) as [ string, string ];
   }, transactionSignaturesToProcess, transactionDataBatchSize));
 
   // If the fourth account input is the second account input in any of the transactions
