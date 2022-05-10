@@ -251,11 +251,11 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
   const transactionSignaturesToProcess = tokenSignatures.filter((s) => !s.err);
 
   // Get each full transaction, and return only the second and fourth account inputs
-  const addressesKeyValue = new Map<string, string>(await promiseAllInBatches(async ({ signature }) => {
+  const addressesKeyValue = new Map<string, string>((await promiseAllInBatches(async ({ signature }) => {
     const transaction = await getConfirmedTransaction(signature, rpcUrl, cache);
 
     return transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey) as [ string, string ];
-  }, transactionSignaturesToProcess, transactionDataBatchSize));
+  }, transactionSignaturesToProcess, transactionDataBatchSize)).filter(Boolean));
 
   // If the fourth account input is the second account input in any of the transactions
   // then that second account input isn't a token but an associated token account. We'll delete those.
