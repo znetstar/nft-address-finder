@@ -52,6 +52,7 @@ async function rpcInvoke<T>(
 interface FindNFTAddressesResponse {
   printAddresses: string[];
   masterAddress: string;
+  metadataProgramAddress?: string;
 }
 
 interface FindNFTAddressesCreatedByResponse {
@@ -257,10 +258,12 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
     return transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey) as [ string, string ];
   }, transactionSignaturesToProcess, transactionDataBatchSize)).filter(Boolean));
 
-  // If the fourth account input is the second account input in any of the transactions
-  // then that second account input isn't a token but an associated token account. We'll delete those.
-  for (let v of Array.from(addressesKeyValue.values())) {
-    addressesKeyValue.delete(v);
+  let metadataProgramAddress: string;
+  for (let [ k, v ] of Array.from(addressesKeyValue.entries())) {
+    if (v === METADATA_ID) {
+      metadataProgramAddress = k;
+      addressesKeyValue.delete(k);
+    }
   }
 
   // Return only the second account inputs
@@ -270,6 +273,7 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
   // of their minting
   return {
     masterAddress: addresses.pop(),
-    printAddresses: addresses
+    printAddresses: addresses,
+    metadataProgramAddress
   }
 }

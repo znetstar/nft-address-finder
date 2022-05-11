@@ -1,10 +1,13 @@
 import {assert} from 'chai';
 import {findNftAddresses, findNftAddressesCreatedBy} from "../index";
 
+import {
+  Metadata
+} from '@metaplex-foundation/mpl-token-metadata';
+
 const prints = [
   "A4tFhL2xaeei16RakryJ6DpmoFHrrwcz3AATGnYQRF3a",
   "9zNEuRSg2j23sKP9Y9uF65P83PqjmAbxSZEYj1vVoCtC",
-  "BkrS8ZJEXCfXrwN1iSkwWFBSCRKyFJmUcRphSa9hgCo6",
   "726Kr2AP69kFoZTHNWd87bxi7jkyHDRLcFKztQBf9nho"
 ]
 
@@ -29,7 +32,7 @@ const createdNfts = [
 ].sort();
 
 describe('nft-address-finder', async function () {
-  this.retries(3);
+  // this.retries(3);
   this.timeout(60e3);
   describe('findNftAddressesCreatedBy', async function () {
 
@@ -46,6 +49,13 @@ describe('nft-address-finder', async function () {
       assert.equal(resp.masterAddress, master);
       assert.deepEqual(resp.printAddresses, prints);
     });
+
+    it(`given a master, should the token's metadata program address`, async function () {
+      const resp = await findNftAddresses(master, process.env.SOLANA_RPC_MAINNET_URI);
+      const addr = await Metadata.getPDA(resp.masterAddress);
+      assert.equal(resp.metadataProgramAddress, addr.toBase58());
+    });
+
 
     it('given any of its prints, should return an object containing an array of prints and a master address', async function () {
       for (const print of prints) {
