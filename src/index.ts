@@ -21,8 +21,7 @@ const DEFAULT_GET_TRANSACTION_OPTIONS = Object.freeze({
   "commitment": "confirmed"
 });
 
-type SignatureResult = { signature: string, err: unknown };
-
+type SignatureResult = { signature: string, err: unknown, blockTime: number };
 
 async function rpcInvoke<T>(
   method: string,
@@ -53,6 +52,7 @@ interface FindNFTAddressesResponse {
   printAddresses: string[];
   masterAddress: string;
   metadataProgramAddress?: string;
+  mintTransactionIds: Record<string, string>;
 }
 
 interface FindNFTAddressesCreatedByResponse {
@@ -85,24 +85,53 @@ interface GetConfirmedTransactionResponse {
 
 /***
  * Returns all the transactions associated with a given address, looping through batches of 1000 until reaching `maxHops`
+ * optionally caching results.
  * @param nftAddress
  * @param rpcUrl
  */
-export async function getAllConfirmedSignaturesForAddress2(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, maxHops: number = DEFAULT_MAX_HOPS) {
-  let results: SignatureResult[] = [];
+export async function getAllConfirmedSignaturesForAddress2(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, maxHops: number = DEFAULT_MAX_HOPS, resultsCache?: TransactionResultsCache) {
+  const results: SignatureResult[] = [];
   let currentBatch: SignatureResult[]|null = null;
 
   let currentHop = 0;
+
+  const until: SignatureResult|null = resultsCache ? await resultsCache.getOldestSignatureResult(nftAddress) : null;
+  const sigs: Set<string> = new Set();
   while (currentHop++ < maxHops && (currentBatch === null || currentBatch.length)) {
+    const opts: { limit?: number, until?: string, before?: string } = { limit: DEFAULT_CONFIRMED_SIGNATURE_LIMIT };
+
+    if (results.slice(-1)[0]?.signature)
+      opts.before = results.slice(-1)[0]?.signature;
+    if (until)
+      opts.until = until.signature;
+
     currentBatch =  await rpcInvoke<SignatureResult[]>(
       'getConfirmedSignaturesForAddress2',
       [
         nftAddress,
-        results.slice(-1)[0]?.signature ? { before: results.slice(-1)[0]?.signature, limit: DEFAULT_CONFIRMED_SIGNATURE_LIMIT } : { limit: DEFAULT_CONFIRMED_SIGNATURE_LIMIT }
+        opts
       ],
       rpcUrl
     );
-    results.push(...currentBatch);
+
+    for (const result of currentBatch) {
+      sigs.add(result.signature);
+      results.push(result);
+    }
+  }
+
+  if (resultsCache && results.length) {
+    await resultsCache.insert(nftAddress, results);
+  }
+
+  if (until) {
+    const remainingResults = await resultsCache.getAllAfterSignatureDescending(nftAddress, until);
+    let result: SignatureResult;
+    while (result = remainingResults.shift()) {
+      if (!sigs.has(result.signature)) {
+        results.push(result);
+      }
+    }
   }
 
   return results;
@@ -127,6 +156,28 @@ export interface TransactionCache {
   get: (signature: string) => Promise<GetConfirmedTransactionResponse|null>;
 }
 
+export interface TransactionResultsCache {
+  /**
+   * Given a query (such as an NFT Address) this should store all `SignatureResults` in persistent storage.
+   * @param query
+   * @param results
+   */
+  insert: (query: string, results: SignatureResult[]) => Promise<void>;
+  /**
+   * Given a query (such as an NFT Address) and a signature, this should return all `SignatureResults`s **after** a the
+   * provided signature (inclusive) in **descending order**.
+   * @param query
+   * @param signature
+   */
+  getAllAfterSignatureDescending: (query: string, signature: SignatureResult) => Promise<SignatureResult[]>;
+  /**
+   * Given a query (such as an NFT Address), this should return the oldest signature in persistent storage.
+   * @param query
+   */
+  getOldestSignatureResult: (query: string) => Promise<SignatureResult|null>;
+}
+
+
 type FindNFTAddressOptions = {
   /**
    * The maximum number of recursive iterations through the blockchain to find transactions (going back in time)
@@ -139,7 +190,11 @@ type FindNFTAddressOptions = {
   /**
    * An optional cache to store transaction data. It's up to you to implement the caching mechanism.
    */
-  cache?: TransactionCache
+  cache?: TransactionCache;
+  /**
+   * An optional cache to store transaction results (lists of signatures). It's up to you to implement the caching mechanism.
+   */
+  resultsCache?: TransactionResultsCache;
 }
 
 /**
@@ -163,14 +218,14 @@ async function getConfirmedTransaction(signature: string, rpcUrl: string, cache?
  * @param rpcUrl
  * @param opts
  */
-async function getOldestTransaction(nftAddress: string, rpcUrl: string, opts: FindNFTAddressOptions) {
+export async function getOldestTransaction(nftAddress: string, rpcUrl: string, opts: FindNFTAddressOptions) {
   let lastSignature = nftAddress;
 
-  const { maxHops, transactionDataBatchSize, cache } = opts;
+  const { maxHops, cache, resultsCache } = opts;
 
   // If the input address is an account address we need the oldest signature associated with the account
   if (nftAddress.match(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)) {
-    const signatures = await getAllConfirmedSignaturesForAddress2(nftAddress, rpcUrl, maxHops);
+    const signatures = await getAllConfirmedSignaturesForAddress2(nftAddress, rpcUrl, maxHops, resultsCache);
     const {signature} = signatures.slice(-1)[0];
     lastSignature = signature;
   }
@@ -187,7 +242,7 @@ async function getOldestTransaction(nftAddress: string, rpcUrl: string, opts: Fi
  * @param opts - Additional options
  */
 export async function findNftAddressesCreatedBy(nftAddress: string, rpcUrl: string = DEFAULT_RPC_URL, opts: FindNFTAddressOptions = { maxHops: DEFAULT_MAX_HOPS, transactionDataBatchSize: DEFAULT_TRANSACTION_DATA_BATCH_SIZE }): Promise<FindNFTAddressesCreatedByResponse> {
-  const tokenSignatures = await getAllConfirmedSignaturesForAddress2(nftAddress, rpcUrl, opts?.maxHops);
+  const tokenSignatures = await getAllConfirmedSignaturesForAddress2(nftAddress, rpcUrl, opts?.maxHops, opts.resultsCache);
 
   const transactionSignaturesToProcess = tokenSignatures.filter((s) => !s.err);
 
@@ -246,23 +301,29 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
   const tokenSignatures = await getAllConfirmedSignaturesForAddress2(
     indexAddress,
     rpcUrl,
-    maxHops
+    maxHops,
+    opts.resultsCache
   );
 
   const transactionSignaturesToProcess = tokenSignatures.filter((s) => !s.err);
 
   // Get each full transaction, and return only the second and fourth account inputs
-  const addressesKeyValue = new Map<string, string>((await promiseAllInBatches(async ({ signature }) => {
+  const addressesKeyValue = new Map<string, { addr: string, txId: string }>((await promiseAllInBatches(async ({ signature }) => {
     const transaction = await getConfirmedTransaction(signature, rpcUrl, cache);
 
-    return transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey) as [ string, string ];
+    const keys: any[] = transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey);
+    keys[1] = { addr: keys[1], txId: signature };
+    return keys as [ string, { addr: string, txId: string } ];
   }, transactionSignaturesToProcess, transactionDataBatchSize)).filter(Boolean));
 
   let metadataProgramAddress: string;
-  for (let [ k, v ] of Array.from(addressesKeyValue.entries())) {
+  let mintTransactionIds: Record<string, string> = {};
+  for (let [ k, { addr: v, txId } ] of Array.from(addressesKeyValue.entries())) {
     if (v === METADATA_ID) {
       metadataProgramAddress = k;
       addressesKeyValue.delete(k);
+    } else {
+      mintTransactionIds[k] = txId;
     }
   }
 
@@ -274,6 +335,7 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
   return {
     masterAddress: addresses.pop(),
     printAddresses: addresses,
-    metadataProgramAddress
+    metadataProgramAddress,
+    mintTransactionIds
   }
 }
