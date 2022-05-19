@@ -48,18 +48,18 @@ async function rpcInvoke<T>(
   }
 }
 
-interface FindNFTAddressesResponse {
+export interface FindNFTAddressesResponse {
   printAddresses: string[];
   masterAddress: string;
   metadataProgramAddress?: string;
   mintTransactionIds: Record<string, string>;
 }
 
-interface FindNFTAddressesCreatedByResponse {
+export interface FindNFTAddressesCreatedByResponse {
   addresses: string[];
 }
 
-interface GetConfirmedTransactionResponse {
+export interface GetConfirmedTransactionResponse {
   meta: {
     postTokenBalances: ({ accountIndex: number, mint: string })[]
   },
@@ -178,7 +178,7 @@ export interface TransactionResultsCache {
 }
 
 
-type FindNFTAddressOptions = {
+export type FindNFTAddressOptions = {
   /**
    * The maximum number of recursive iterations through the blockchain to find transactions (going back in time)
    */
@@ -203,7 +203,7 @@ type FindNFTAddressOptions = {
  * @param rpcUrl
  * @param cache
  */
-async function getConfirmedTransaction(signature: string, rpcUrl: string, cache?: TransactionCache) {
+export async function getConfirmedTransaction(signature: string, rpcUrl: string, cache?: TransactionCache) {
   let transaction: GetConfirmedTransactionResponse|null = cache ? await cache.get(signature) : null;
   if (!transaction) {
     transaction = await rpcInvoke<GetConfirmedTransactionResponse>('getConfirmedTransaction', [signature, DEFAULT_GET_TRANSACTION_OPTIONS], rpcUrl);
