@@ -312,6 +312,10 @@ export async function findNftAddresses(nftAddress: string, rpcUrl: string = DEFA
     const transaction = await getConfirmedTransaction(signature, rpcUrl, cache);
 
     const keys: any[] = transaction?.transaction?.message?.accountKeys.slice(1, 3).map(a => a.pubkey);
+
+    if (!keys || !keys[1])
+      return null;
+
     keys[1] = { addr: keys[1], txId: signature };
     return keys as [ string, { addr: string, txId: string } ];
   }, transactionSignaturesToProcess, transactionDataBatchSize)).filter(Boolean));
