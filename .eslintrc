@@ -1,0 +1,38 @@
+{
+  "extends": [
+    "eslint:recommended",
+    "google",
+    "prettier",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "env": {
+    "node": true,
+    "commonjs": true,
+    "es6": true
+  },
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["prettier", "@typescript-eslint"],
+  "parserOptions": {
+    "requireConfigFile": false
+  },
+  "rules": {
+    "prettier/prettier": ["error", {
+      "singleQuote": true,
+      "tabWidth": 2,
+      "useTabs": false
+    }],
+    "consistent-return": 2,
+    "no-else-return"   : 1,
+    "semi"             : [1, "always"],
+    "space-unary-ops"  : 2,
+    "max-len": "off",
+    "require-jsdoc": "off",
+    "@typescript-eslint/no-empty-function": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "no-await-in-loop": "off",
+    "new-cap": "off",
+    "valid-jsdoc": "off",
+    "no-process-exit": "off",
+    "unicorn/no-process-exit": "off"
+  }
+}
