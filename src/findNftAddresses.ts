@@ -135,6 +135,7 @@ export async function findNftAddresses(
       addressesKeyValue.delete(k);
     } else if (v === indexAddress) {
       metadataProgramAddress = v;
+      mintTransactionIds[k] = txId;
     } else {
       mintTransactionIds[k] = txId;
     }
